@@ -46,8 +46,6 @@ def main():
                 d = load_dataset(args.data, train_files=range(1, 13), val_files=(), test_files=(13, 14, 15))
             else:
                 d = random_row_split(args.data, range(1, 16), test_frac=0.2, seed=seed)
-            # (val is unused here; point it at test so the run() signature is satisfied)
-            d.val = d.test
             r = run({**cfg, "seed": seed}, d, device=args.device)
             out["mlp"][split].append({"final": r["test"]["final"], "last10_mean": r["test"]["last10_mean"]})
             rf = RandomForestClassifier(200, n_jobs=4, random_state=seed).fit(d.train.X, d.train.y)

@@ -1,4 +1,5 @@
 # Main grid: centralized (compute-matched) vs FedAvg vs FedProx, 3 seeds each.
+# FedProx mu=0.1 was selected by configs/tune_mu.yaml (best VALIDATION macro-F1, last-10 mean).
 base:
   num_clients: 10
   rounds: 100
@@ -11,4 +12,4 @@ base:
 runs:
   - {mode: central, seed: [0, 1, 2]}
   - {mode: fedavg, alpha: [iid, 0.5, 0.1], seed: [0, 1, 2]}
-  - {mode: fedprox, alpha: [iid, 0.5, 0.1], mu: MU_PLACEHOLDER, seed: [0, 1, 2]}
+  - {mode: fedprox, alpha: [iid, 0.5, 0.1], mu: 0.1, seed: [0, 1, 2]}

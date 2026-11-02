@@ -124,3 +124,40 @@ def test_preprocessor_fits_on_train_only_and_handles_inf():
     assert np.isfinite(z).all()
     assert z[0, 0] == pytest.approx(10.0)  # (100-3)/std, clipped at 10
     assert z[0, 1] == pytest.approx((3.0 - p.mean[1]) / p.std[1])  # imputed with train median
+
+
+def test_opacus_usage_without_noise_or_clipping_equals_plain_sgd():
+    """Sanity check of how we wire Opacus: with sigma=0, a huge clip norm and
+    expected_batch_size equal to the actual batch, one DPOptimizer step must
+    equal one plain SGD step on the same batch (so the mean-loss scaling is right)."""
+    import torch.nn.functional as F
+    from opacus import GradSampleModule
+    from opacus.optimizers import DPOptimizer
+
+    torch.manual_seed(0)
+    X = torch.randn(32, 8)
+    y = torch.randint(0, 3, (32,))
+    a, b = MLP(8, 16, 3), MLP(8, 16, 3)
+    b.load_state_dict(a.state_dict())
+
+    oa = torch.optim.SGD(a.parameters(), lr=0.1)
+    F.cross_entropy(a(X), y).backward()
+    oa.step()
+
+    g = GradSampleModule(b, loss_reduction="mean")
+    ob = DPOptimizer(torch.optim.SGD(g.parameters(), lr=0.1), noise_multiplier=0.0,
+                     max_grad_norm=1e6, expected_batch_size=32, loss_reduction="mean")
+    F.cross_entropy(g(X), y).backward()
+    ob.step()
+    for (k, va), vb in zip(a.state_dict().items(), b.state_dict().values()):
+        assert torch.allclose(va, vb, atol=1e-5), k
+
+
+def test_dp_noise_multiplier_hits_target_epsilon():
+    from fedpriv.train import DPClient
+
+    c = DPClient(5000, batch_size=256, rounds=20, local_epochs=2, target_epsilon=3.0,
+                 delta=1e-5, max_grad_norm=1.0)
+    for _ in range(c.total_steps):
+        c.accountant.step(noise_multiplier=c.sigma, sample_rate=c.q)
+    assert 2.9 <= c.epsilon() <= 3.0 + 1e-6
