@@ -266,7 +266,7 @@ Please cite the dataset authors if you use the data:
 
 ## How this was built
 
-Every number in this README and in `REPORT.md` comes from the run files in `results/`, generated
+Every number in this README comes from the run files in `results/`, generated
 by the scripts above on the machine described in the reproducibility section.
 
 ## License
