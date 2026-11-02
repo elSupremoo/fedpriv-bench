@@ -1,0 +1,17 @@
+# Light (lr, clip C) selection for DP-FedAvg under schedule B, done AFTER the
+# schedule-A result showed that clipping at C=1 alone (eps=inf) collapses the
+# model to the majority class. Selection: eps=3, tuning-only seed 100, by
+# VALIDATION macro-F1 (last-10 mean). The validation files (11-12) are held out
+# from every client, so this tuning does not touch the clients' private data.
+base:
+  tag: dptune
+  num_clients: 10
+  rounds: 30
+  local_epochs: 1
+  batch_size: 256
+  momentum: 0.9
+  hidden: 256
+  min_client_size: 100
+  delta: 1.0e-5
+runs:
+  - {mode: dp_fedavg, alpha: 0.5, target_epsilon: 3.0, lr: [0.05, 0.2], max_grad_norm: [1.0, 5.0, 20.0], seed: 100}

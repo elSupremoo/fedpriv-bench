@@ -34,6 +34,8 @@ def run_name(cfg: dict) -> str:
         parts.append(f"mu{cfg['mu']}")
     if cfg["mode"] == "dp_fedavg":
         parts.append(f"eps{cfg['target_epsilon']}")
+        if cfg.get("tag") == "dptune":
+            parts.append(f"lr{cfg['lr']}_C{cfg['max_grad_norm']}")
     parts.append(f"s{cfg['seed']}")
     return "_".join(p for p in parts if p)
 

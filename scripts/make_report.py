@@ -166,25 +166,48 @@ def main():
             md.append(f"| {k[3]} | {100 * v['acc']:.1f} | {v['macro_f1']:.3f} |")
 
     # ---------------- DP ----------------
-    dp = sorted([k for k in groups if k[1] == "dp_fedavg"], key=lambda k: k[4])
-    ref = ("", "fedavg", "0.5", None, None)
-    if dp:
-        md.append("\n## Privacy-utility (DP-FedAvg, Dir α=0.5, δ=1e-5, clip C=1.0, test)\n")
+    dptune = sorted([r for r in runs if r["config"].get("tag") == "dptune"],
+                    key=lambda r: (r["config"]["lr"], r["config"]["max_grad_norm"]))
+    if dptune:
+        md.append("\n## DP hyper-parameter selection (schedule B, ε=3, seed 100, VALIDATION set)\n")
+        md.append("| lr | clip C | Val acc last-10 | Val macro-F1 last-10 |")
+        md.append("|---|---|---|---|")
+        for r in dptune:
+            v = r["val"]["last10_mean"]
+            md.append(f"| {r['config']['lr']} | {r['config']['max_grad_norm']} | {100 * v['acc']:.1f} | "
+                      f"{v['macro_f1']:.3f} |")
+
+    dp_blocks = {}
+    for tag, ref_tag, title in (
+        ("", "", "A1: R=100 x E=2, lr 0.05, C=1 (main-grid hyper-parameters)"),
+        ("short", "short", "B: R=30 x E=1, lr 0.2, C=20 (selected on validation)"),
+        ("c20", "", "A2: R=100 x E=2, lr 0.2, C=20 (B's selection reused)"),
+    ):
+        dp = sorted([k for k in groups if k[1] == "dp_fedavg" and k[0] == tag], key=lambda k: k[4])
+        ref = (ref_tag, "fedavg", "0.5", None, None)
+        if not dp:
+            continue
+        dp_blocks[tag] = (dp, ref, title)
+        md.append(f"\n## Privacy-utility, schedule {title}; DP-FedAvg, Dir α=0.5, δ=1e-5, test\n")
         md.append("| Target ε | Achieved ε (worst client, mean over seeds) | Noise multiplier σ (range over clients) | "
-                  "Acc last-10 | Macro-F1 last-10 | Recall NoEvents last-10 | n |")
-        md.append("|---|---|---|---|---|---|---|")
+                  "Acc last-10 | Macro-F1 final | Macro-F1 last-10 | Recall Natural last-10 | "
+                  "Recall NoEvents last-10 | n |")
+        md.append("|---|---|---|---|---|---|---|---|---|")
         for k in dp:
             rs = groups[k]
             m = metric_row(rs)
             eps = [r["epsilon_max"] for r in rs]
             sig = [s for r in rs for s in r["noise_multipliers"]]
-            eps_s = "∞ (clip only)" if math.isinf(eps[0]) else f"{np.mean(eps):.2f}"
+            eps_s = "∞ (clip only, σ=0)" if math.isinf(eps[0]) else f"{np.mean(eps):.2f}"
             md.append(f"| {'∞' if math.isinf(k[4]) else k[4]} | {eps_s} | {min(sig):.2f}-{max(sig):.2f} | "
-                      f"{m['acc_l10']} | {m['f1_l10']} | {m['rec_l10'][2]} | {len(rs)} |")
+                      f"{m['acc_l10']} | {m['f1_final']} | {m['f1_l10']} | {m['rec_l10'][1]} | {m['rec_l10'][2]} | "
+                      f"{len(rs)} |")
         if ref in groups:
             m = metric_row(groups[ref])
-            md.append(f"| non-private FedAvg | - | - | {m['acc_l10']} | {m['f1_l10']} | {m['rec_l10'][2]} | "
-                      f"{len(groups[ref])} |")
+            md.append(f"| non-private FedAvg (lr {groups[ref][0]['config']['lr']}, no clip, no noise) | - | - | {m['acc_l10']} | {m['f1_final']} | {m['f1_l10']} | "
+                      f"{m['rec_l10'][1]} | {m['rec_l10'][2]} | {len(groups[ref])} |")
+        md.append(f"| majority class | - | - | {100 * maj['acc']:.1f} | {maj['macro_f1']:.3f} | "
+                  f"{maj['macro_f1']:.3f} | 0.0 | 0.0 | - |")
 
     # ---------------- leakage check ----------------
     lk = ROOT / "results/leakage_check.json"
@@ -200,6 +223,20 @@ def main():
                           f"{'by scenario set (files 13-15)' if split == 'set' else 'random 20% of rows'} | "
                           f"{ms([x['acc'] for x in rows])} | {ms3([x['macro_f1'] for x in rows])} |")
 
+    gnp = ROOT / "results/grad_norms.json"
+    if gnp.exists():
+        G = json.load(open(gnp))
+        md.append("\n## Per-sample gradient norms by class (non-private centralized training, 3 seeds)\n")
+        md.append("Median per-sample gradient L2 norm on 4,000 training rows, and the mean factor min(1, C/norm) "
+                  "by which clipping at C=1 scales a sample's gradient (mean over seeds).\n")
+        md.append("| Epochs trained | " + " | ".join(f"{c} median norm | {c} clip factor (C=1)" for c in CLASSES) + " |")
+        md.append("|---|" + "---|---|" * len(CLASSES))
+        for e in sorted({r["epochs"] for r in G}):
+            rows = [r for r in G if r["epochs"] == e]
+            md.append(f"| {e} | " + " | ".join(
+                f"{np.mean([r[c]['median'] for r in rows]):.2f} | {np.mean([r[c]['mean_shrink_factor_C1'] for r in rows]):.2f}"
+                for c in CLASSES) + " |")
+
     # ---------------- wall time ----------------
     tot = sum(r["wall_time_s"] for r in runs)
     md.append("\n## Wall-clock time\n")
@@ -207,7 +244,7 @@ def main():
     md.append("|---|---|---|---|")
     by_mode = defaultdict(list)
     for r in runs:
-        by_mode[("tune " if r["config"].get("tag") == "tune" else "") + r["config"]["mode"]].append(r["wall_time_s"])
+        by_mode[(r["config"].get("tag", "") + " " + r["config"]["mode"]).strip()].append(r["wall_time_s"])
     for m, ts in sorted(by_mode.items()):
         md.append(f"| {m} | {len(ts)} | {sum(ts) / 60:.1f} | {np.mean(ts) / 60:.2f} |")
     extra = json.load(open(lk))["wall_time_s"] if lk.exists() else 0.0
@@ -262,30 +299,25 @@ def main():
     fig.savefig(FIG / "curves_by_alpha.png", dpi=150)
     plt.close(fig)
 
-    # Fig 2: privacy-utility
-    if dp:
-        fig, ax = plt.subplots(figsize=(5.5, 3.6))
-        finite = [k for k in dp if not math.isinf(k[4])]
-        xs = [k[4] for k in finite]
-        for metric, col, lab in (("acc", C_FEDAVG, "Accuracy"), ("macro_f1", C_FEDPROX, "Macro-F1 ×100")):
-            ys = [np.mean([100 * r["test"]["last10_mean"][metric] for r in groups[k]]) for k in finite]
-            es = [np.std([100 * r["test"]["last10_mean"][metric] for r in groups[k]], ddof=1) for k in finite]
-            ax.errorbar(xs, ys, yerr=es, color=col, marker="o", ms=6, lw=1.6, capsize=3, label=f"{lab}, DP-FedAvg")
-            inf_k = [k for k in dp if math.isinf(k[4])]
-            if inf_k:
-                v = np.mean([100 * r["test"]["last10_mean"][metric] for r in groups[inf_k[0]]])
-                ax.axhline(v, color=col, ls=":", lw=1.2, label=f"{lab}, clip only (ε=∞)")
-            if ref in groups:
-                v = np.mean([100 * r["test"]["last10_mean"][metric] for r in groups[ref]])
-                ax.axhline(v, color=col, ls="--", lw=1.0, alpha=0.7, label=f"{lab}, non-private")
-        ax.set_xscale("log")
-        ax.set_xticks(xs)
-        ax.set_xticklabels([f"{x:g}" for x in xs])
-        ax.set_xlabel("Target ε (δ=1e-5), per-client record-level")
-        ax.set_ylabel("Test, last-10-round mean")
+    # Fig 2: privacy-utility (macro-F1 only: accuracy sits at the majority rate and hides collapse)
+    if dp_blocks:
+        fig, ax = plt.subplots(figsize=(6.4, 3.8))
+        xlabels = ["ε=1", "ε=3", "ε=8", "ε=∞\n(clip only)", "non-private\n(no clip)"]
+        for (tag, (dp, ref, title)), col in zip(dp_blocks.items(), (C_FEDAVG, C_FEDPROX, C_CENTRAL)):
+            ks = dp + ([ref] if ref in groups else [])
+            ys = [np.mean([r["test"]["last10_mean"]["macro_f1"] for r in groups[k]]) for k in ks]
+            es = [np.std([r["test"]["last10_mean"]["macro_f1"] for r in groups[k]], ddof=1) for k in ks]
+            xs = np.arange(len(ks)) + {"": -0.08, "short": 0.0, "c20": 0.08}[tag]
+            ax.errorbar(xs, ys, yerr=es, color=col, marker="o", ms=6, lw=1.6, capsize=3,
+                        label="Schedule " + title.split(" (")[0])
+        ax.axhline(maj["macro_f1"], color=MUTED, ls="--", lw=1.0, label="Majority class ('Attack')")
+        ax.set_xticks(range(len(xlabels)))
+        ax.set_xticklabels(xlabels, fontsize=8)
+        ax.set_ylabel("Test macro-F1 (last-10-round mean)")
+        ax.set_xlabel("Per-client record-level privacy budget (δ=1e-5)")
         ax.grid(axis="y", color="#e5e4e0", lw=0.6)
-        ax.legend(frameon=False, fontsize=7, loc="lower right")
-        ax.set_title("Privacy-utility, DP-FedAvg, Dirichlet α=0.5 (3 seeds)", color=INK)
+        ax.legend(frameon=False, fontsize=7, loc="upper left")
+        ax.set_title("Privacy-utility, DP-FedAvg, Dirichlet α=0.5 (mean ± std, 3 seeds)", color=INK, fontsize=9)
         fig.tight_layout()
         fig.savefig(FIG / "privacy_utility.png", dpi=150)
         plt.close(fig)

@@ -1,0 +1,21 @@
+# Second privacy-utility block ("schedule B"), added AFTER seeing that schedule A
+# (R=100, E=2 -> ~200 local epochs per client) needs very large noise multipliers
+# (sigma up to ~40 at eps=1) and that clipping at C=1 alone already collapses the
+# model to the majority class. Fewer DP-SGD steps means less noise for the same eps.
+# Schedule fixed a priori: R=30 rounds x E=1 local epoch.
+# DP lr=0.2 and clip C=20 were selected on the VALIDATION files by
+# configs/dp_short_tune.yaml (eps=3, seed 100). The non-private reference uses
+# the main-grid lr=0.05 (no clipping, no noise) at the same schedule.
+base:
+  tag: short
+  num_clients: 10
+  rounds: 30
+  local_epochs: 1
+  batch_size: 256
+  momentum: 0.9
+  hidden: 256
+  min_client_size: 100
+  delta: 1.0e-5
+runs:
+  - {mode: fedavg, alpha: 0.5, lr: 0.05, seed: [0, 1, 2]}
+  - {mode: dp_fedavg, alpha: 0.5, lr: 0.2, max_grad_norm: 20.0, target_epsilon: [1.0, 3.0, 8.0, .inf], seed: [0, 1, 2]}

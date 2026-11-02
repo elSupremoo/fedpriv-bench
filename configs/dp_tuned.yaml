@@ -1,0 +1,19 @@
+# Third privacy-utility block ("schedule A, C=20"): schedule B showed that 30
+# rounds are too few for even the non-private model to learn the minority
+# classes, so its DP curve is limited by under-training. This block re-runs the
+# main-grid schedule (R=100, E=2) with the DP hyper-parameters selected on
+# validation for schedule B (lr=0.2, clip C=20; configs/dp_short_tune.yaml),
+# reused as-is (not re-tuned for this schedule). The non-private reference is
+# fedavg_a0.5 from configs/main.yaml.
+base:
+  tag: c20
+  num_clients: 10
+  rounds: 100
+  local_epochs: 2
+  batch_size: 256
+  momentum: 0.9
+  hidden: 256
+  min_client_size: 100
+  delta: 1.0e-5
+runs:
+  - {mode: dp_fedavg, alpha: 0.5, lr: 0.2, max_grad_norm: 20.0, target_epsilon: [1.0, 3.0, 8.0, .inf], seed: [0, 1, 2]}
