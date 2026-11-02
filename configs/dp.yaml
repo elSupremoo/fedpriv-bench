@@ -1,0 +1,16 @@
+# Privacy-utility curve: DP-FedAvg (client-side DP-SGD via Opacus), alpha=0.5.
+# Same R, E, B, lr as the main grid. eps=.inf means clipping only (noise 0).
+# The non-private reference is fedavg_a0.5 from configs/main.yaml.
+base:
+  num_clients: 10
+  rounds: 100
+  local_epochs: 2
+  batch_size: 256
+  lr: 0.05
+  momentum: 0.9
+  hidden: 256
+  min_client_size: 100
+  delta: 1.0e-5
+  max_grad_norm: 1.0
+runs:
+  - {mode: dp_fedavg, alpha: 0.5, target_epsilon: [1.0, 3.0, 8.0, .inf], seed: [0, 1, 2]}

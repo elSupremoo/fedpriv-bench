@@ -1,0 +1,13 @@
+# Light FedProx mu tuning: alpha=0.1 (hardest split), one tuning-only seed (100),
+# selection by VALIDATION macro-F1 averaged over the last 10 rounds.
+base:
+  num_clients: 10
+  rounds: 100
+  local_epochs: 2
+  batch_size: 256
+  lr: 0.05
+  momentum: 0.9
+  hidden: 256
+  min_client_size: 100
+runs:
+  - {tag: tune, mode: fedprox, alpha: 0.1, mu: [0.001, 0.01, 0.1, 1.0], seed: 100}
