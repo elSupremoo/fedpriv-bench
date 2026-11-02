@@ -115,6 +115,15 @@ def main():
         m = metric_row(groups[k])
         md.append(f"| {label(k)} | {len(groups[k])} | {m['acc_final']} | {m['acc_l10']} | {m['f1_final']} | "
                   f"{m['f1_l10']} | " + " | ".join(m["rec_l10"]) + " |")
+    # Trivial reference: always predict the training-majority class (Attack).
+    from fedpriv.data import load_dataset
+    from fedpriv.metrics import scores
+
+    d = load_dataset(ROOT / "data/raw/triple")
+    maj = scores(d.test.y, np.full_like(d.test.y, np.bincount(d.train.y).argmax()))
+    md.append(f"| Majority class (always 'Attack') | - | {100 * maj['acc']:.1f} | {100 * maj['acc']:.1f} | "
+              f"{maj['macro_f1']:.3f} | {maj['macro_f1']:.3f} | "
+              + " | ".join(f"{100 * x:.1f}" for x in maj["recall"]) + " |")
 
     # compute-matching check
     md.append("\n### Compute matching (sample-gradient passes per run)\n")
@@ -127,14 +136,24 @@ def main():
             md.append(f"| {label(k)} | {np.mean([r['sample_grad_passes'] for r in groups[k]]):,.0f} | "
                       f"{r0['n_train'] * c['rounds'] * c['local_epochs']:,} |")
 
-    # validation table (for completeness; mu was chosen on val)
-    md.append("\n## Validation (files 11-12), last-10 mean\n")
-    md.append("| Setting | Acc last-10 | Macro-F1 last-10 |")
-    md.append("|---|---|---|")
+    # validation table + early stopping on validation (a third non-cherry-picked view)
+    md.append("\n## Validation (files 11-12) and test at the validation-selected round\n")
+    md.append("The round with the highest VALIDATION macro-F1 is selected per run (early stopping "
+              "without looking at test); the test metrics at that round are reported.\n")
+    md.append("| Setting | Val acc last-10 | Val macro-F1 last-10 | Selected round (mean) | "
+              "Test acc @ selected | Test macro-F1 @ selected |")
+    md.append("|---|---|---|---|---|---|")
     for k in order:
         if k in groups:
             m = metric_row(groups[k], "val")
-            md.append(f"| {label(k)} | {m['acc_l10']} | {m['f1_l10']} |")
+            sel_r, sel_acc, sel_f1 = [], [], []
+            for r in groups[k]:
+                i = int(np.argmax([h["macro_f1"] for h in r["val"]["history"]]))
+                sel_r.append(i + 1)
+                sel_acc.append(r["test"]["history"][i]["acc"])
+                sel_f1.append(r["test"]["history"][i]["macro_f1"])
+            md.append(f"| {label(k)} | {m['acc_l10']} | {m['f1_l10']} | {np.mean(sel_r):.0f} | "
+                      f"{ms(sel_acc)} | {ms3(sel_f1)} |")
 
     # ---------------- tuning ----------------
     tune = sorted([k for k in groups if k[0] == "tune"], key=lambda k: k[3])
@@ -198,6 +217,7 @@ def main():
     md.append(f"\nEnvironment: {json.dumps(env)}\n")
 
     (ROOT / "results/summary.md").write_text("\n".join(md) + "\n", encoding="utf-8")
+    sys.stdout.reconfigure(encoding="utf-8")
     print("\n".join(md))
 
     # ---------------- figures ----------------
@@ -226,6 +246,8 @@ def main():
                 ax.plot(x, f * mu_, color=col, lw=1.6, label=lab)
                 ax.fill_between(x, f * (mu_ - sd), f * (mu_ + sd), color=col, alpha=0.15, lw=0)
             ax.axvspan(91, 100, color=MUTED, alpha=0.08, lw=0)
+            ax.axhline(100 * maj["acc"] if metric == "acc" else maj["macro_f1"], color=MUTED, ls="--", lw=1.0,
+                       label="Majority class ('Attack')")
             ax.grid(axis="y", color="#e5e4e0", lw=0.6)
             if i == 0:
                 ax.set_title("IID" if a == "iid" else f"Dirichlet α={a}", color=INK)
@@ -233,8 +255,9 @@ def main():
                 ax.set_ylabel("Test accuracy (%)" if metric == "acc" else "Test macro-F1")
             if i == 1:
                 ax.set_xlabel("Round (centralized: every 2 epochs)")
-    axes[0, 0].legend(frameon=False, loc="lower right")
-    fig.suptitle("Test accuracy and macro-F1 per round (mean ± std, 3 seeds; shaded band = last-10 window)", color=INK)
+    axes[1, 0].legend(frameon=False, loc="lower right", fontsize=7)
+    fig.suptitle("Test accuracy and macro-F1 per round (mean ± std band, 3 seeds; grey column = last-10 window)",
+                 color=INK)
     fig.tight_layout()
     fig.savefig(FIG / "curves_by_alpha.png", dpi=150)
     plt.close(fig)
@@ -283,7 +306,8 @@ def main():
     ax.set_xticklabels([label(k).replace(" (compute-matched)", "\n(compute-matched)").replace(", ", "\n")
                         for k in sel], fontsize=7)
     ax.set_ylabel("Test recall (%), last-10 mean")
-    ax.set_ylim(0, 100)
+    ax.set_ylim(0, 115)
+    ax.set_yticks(range(0, 101, 20))
     ax.grid(axis="y", color="#e5e4e0", lw=0.6)
     ax.legend(frameon=False, ncol=3, loc="upper right")
     ax.set_title("Per-class recall (mean ± std, 3 seeds)", color=INK)
